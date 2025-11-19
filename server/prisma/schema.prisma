@@ -1,0 +1,107 @@
+// En: server/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- ENUMS ---
+
+enum Role {
+  ADMIN
+  DOCENTE
+  ESTUDIANTE
+}
+
+enum OTPPurpose {
+  VERIFICATION
+  PASSWORD_RESET
+}
+
+// --- MODELOS ---
+
+model User {
+  id         String   @id @default(cuid())
+  name       String
+  email      String   @unique
+  password   String
+  role       Role     @default(ESTUDIANTE)
+  isVerified Boolean  @default(false) // Para activar/desactivar usuarios
+  createdAt  DateTime @default(now())
+  
+  // Relaciones
+  materials     Material[]
+  studentExams  StudentExam[]
+  authoredExams Exam[]
+  
+  // Relación con el Historial (Un usuario puede realizar muchas acciones)
+  auditLogs     AuditLog[] @relation("AuditActor")
+}
+
+model Material {
+  id          String   @id @default(cuid())
+  title       String
+  content     String?
+  
+  // ¡IMPORTANTE! Esto es un Array de Strings para guardar múltiples URLs de archivos
+  attachments String[] 
+  
+  createdAt   DateTime @default(now())
+
+  author      User     @relation(fields: [authorId], references: [id])
+  authorId    String
+}
+
+model Exam {
+  id        String   @id @default(cuid())
+  title     String
+  questions Json     // Preguntas y opciones en formato JSON
+  createdAt DateTime @default(now())
+
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String
+  
+  submissions StudentExam[]
+}
+
+model StudentExam {
+  id          String   @id @default(cuid())
+  answers     Json     // Respuestas del estudiante
+  grade       Float?   // Nota (puede ser nula si no se ha calificado)
+  submitted   Boolean  @default(false)
+  submittedAt DateTime @default(now())
+
+  student     User     @relation(fields: [studentId], references: [id])
+  studentId   String
+  exam        Exam     @relation(fields: [examId], references: [id])
+  examId      String
+}
+
+model OTP {
+  id        String     @id @default(cuid())
+  email     String
+  code      String
+  purpose   OTPPurpose // VERIFICACION o RESETEO
+  expiresAt DateTime
+  used      Boolean    @default(false)
+}
+
+// --- HISTORIAL DE AUDITORÍA (WAOOO) ---
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String   // Ej: "USER_LOGIN", "MATERIAL_CREATED"
+  timestamp DateTime @default(now())
+  
+  ipAddress String?  // <-- ¡AQUÍ GUARDAMOS LA IP!
+  details   Json?    // Detalles extra del evento
+  
+  actorId   String   // Quién hizo la acción
+  targetId  String?  // A quién/qué afectó
+
+  // Relación inversa con User
+  actor     User     @relation("AuditActor", fields: [actorId], references: [id])
+}
