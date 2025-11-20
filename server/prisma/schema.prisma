@@ -30,7 +30,7 @@ model User {
   email      String   @unique
   password   String
   role       Role     @default(ESTUDIANTE)
-  isVerified Boolean  @default(false) // Para activar/desactivar usuarios
+  isVerified Boolean  @default(false)
   createdAt  DateTime @default(now())
   
   // Relaciones
@@ -38,7 +38,7 @@ model User {
   studentExams  StudentExam[]
   authoredExams Exam[]
   
-  // Relación con el Historial (Un usuario puede realizar muchas acciones)
+  // Relación con el Historial
   auditLogs     AuditLog[] @relation("AuditActor")
 }
 
@@ -46,10 +46,7 @@ model Material {
   id          String   @id @default(cuid())
   title       String
   content     String?
-  
-  // ¡IMPORTANTE! Esto es un Array de Strings para guardar múltiples URLs de archivos
-  attachments String[] 
-  
+  attachments String[] // Array de URLs
   createdAt   DateTime @default(now())
 
   author      User     @relation(fields: [authorId], references: [id])
@@ -59,19 +56,24 @@ model Material {
 model Exam {
   id        String   @id @default(cuid())
   title     String
-  questions Json     // Preguntas y opciones en formato JSON
+  questions Json     
   createdAt DateTime @default(now())
+
+  duration  Int      @default(60)
+
 
   author    User     @relation(fields: [authorId], references: [id])
   authorId  String
+  assignedTo String[] 
   
   submissions StudentExam[]
 }
 
 model StudentExam {
   id          String   @id @default(cuid())
-  answers     Json     // Respuestas del estudiante
-  grade       Float?   // Nota (puede ser nula si no se ha calificado)
+  answers     Json     
+  grade       Float?
+  feedback    String?
   submitted   Boolean  @default(false)
   submittedAt DateTime @default(now())
 
@@ -85,23 +87,21 @@ model OTP {
   id        String     @id @default(cuid())
   email     String
   code      String
-  purpose   OTPPurpose // VERIFICACION o RESETEO
+  purpose   OTPPurpose
   expiresAt DateTime
   used      Boolean    @default(false)
 }
 
-// --- HISTORIAL DE AUDITORÍA (WAOOO) ---
 model AuditLog {
   id        String   @id @default(cuid())
-  action    String   // Ej: "USER_LOGIN", "MATERIAL_CREATED"
+  action    String   
   timestamp DateTime @default(now())
   
-  ipAddress String?  // <-- ¡AQUÍ GUARDAMOS LA IP!
-  details   Json?    // Detalles extra del evento
+  ipAddress String?
+  details   Json?
   
-  actorId   String   // Quién hizo la acción
-  targetId  String?  // A quién/qué afectó
+  actorId   String   
+  targetId  String?
 
-  // Relación inversa con User
   actor     User     @relation("AuditActor", fields: [actorId], references: [id])
 }

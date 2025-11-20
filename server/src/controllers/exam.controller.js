@@ -6,7 +6,8 @@ import prisma from '../prismaClient.js';
  */
 export const createExam = async (req, res) => {
   try {
-    const { title, questions } = req.body;
+    // Recibimos assignedTo (array de IDs) y duration (minutos) del frontend
+    const { title, questions, assignedTo, duration } = req.body; 
     const authorId = req.user.userId; // De 'authenticateToken'
 
     if (!title || !questions) {
@@ -23,6 +24,10 @@ export const createExam = async (req, res) => {
         title,
         questions, // Prisma se encarga de guardar el JSON
         authorId,
+        // Si no envían nada, guardamos array vacío (significa "Para Todos")
+        assignedTo: assignedTo || [],
+        // Guardamos la duración o 60 minutos por defecto
+        duration: parseInt(duration) || 60 
       }
     });
 
@@ -35,11 +40,29 @@ export const createExam = async (req, res) => {
 
 /**
  * Obtiene todos los exámenes.
- * Para todos los usuarios logueados.
+ * - Docentes/Admins: Ven todos.
+ * - Estudiantes: Ven solo los públicos (assignedTo vacío) o los asignados a ellos.
  */
 export const getAllExams = async (req, res) => {
   try {
+    const userId = req.user.userId;
+    const userRole = req.user.role;
+
+    let whereClause = {};
+
+    // Lógica de Filtrado para Estudiantes:
+    if (userRole === 'ESTUDIANTE') {
+      whereClause = {
+        OR: [
+          { assignedTo: { has: userId } }, // O está asignado específicamente a mí
+          { assignedTo: { equals: [] } }   // O está vacío (para todos)
+        ]
+      };
+    }
+    // Docentes y Admins ven todos (whereClause se queda vacío)
+
     const exams = await prisma.exam.findMany({
+      where: whereClause,
       include: {
         author: {
           select: { name: true }
@@ -48,8 +71,10 @@ export const getAllExams = async (req, res) => {
         _count: {
           select: { submissions: true }
         }
-      }
+      },
+      orderBy: { createdAt: 'desc' }
     });
+    
     res.status(200).json(exams);
   } catch (error) {
     console.error("Error al obtener exámenes:", error);
@@ -60,8 +85,6 @@ export const getAllExams = async (req, res) => {
 /**
  * Obtiene un examen por su ID.
  * Para todos los usuarios logueados.
- * NOTA: Los estudiantes verán las preguntas, pero no las respuestas correctas.
- * (Por ahora, enviamos todo. El frontend se encargará de ocultarlo)
  */
 export const getExamById = async (req, res) => {
   try {
@@ -79,10 +102,6 @@ export const getExamById = async (req, res) => {
       return res.status(404).json({ message: "Examen no encontrado." });
     }
 
-    // Lógica futura: Si el req.user.role es 'ESTUDIANTE', podríamos filtrar
-    // las respuestas correctas del JSON 'questions' antes de enviarlo.
-    // Por ahora, lo enviamos completo.
-
     res.status(200).json(exam);
   } catch (error) {
     console.error("Error al obtener examen por ID:", error);
@@ -97,7 +116,8 @@ export const getExamById = async (req, res) => {
 export const updateExam = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, questions } = req.body;
+    // Recibimos los campos actualizables
+    const { title, questions, assignedTo, duration } = req.body;
     const userId = req.user.userId;
     const userRole = req.user.role;
 
@@ -118,7 +138,9 @@ export const updateExam = async (req, res) => {
       where: { id: id },
       data: {
         title,
-        questions
+        questions,
+        assignedTo: assignedTo || [], // Actualizamos asignación
+        duration: parseInt(duration) || 60 // Actualizamos duración
       }
     });
 
@@ -152,8 +174,6 @@ export const deleteExam = async (req, res) => {
       return res.status(403).json({ message: "No tienes permisos para eliminar este examen." });
     }
 
-    // TODO: ¿Qué pasa si un estudiante ya entregó este examen?
-    // Por ahora, lo borramos. En el futuro, podríamos archivarlo.
     await prisma.exam.delete({
       where: { id: id }
     });

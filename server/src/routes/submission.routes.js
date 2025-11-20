@@ -7,12 +7,13 @@ import {
 } from '../controllers/submission.controller.js';
 
 import { authenticateToken, authorizeRole } from '../middlewares/auth.middleware.js';
+import { getSubmissionById } from '../controllers/submission.controller.js';
 
 const router = Router();
 
 // Aplicamos autenticación a TODAS las rutas
 router.use(authenticateToken);
-
+router.get('/:id', authorizeRole(['DOCENTE', 'ADMIN']), getSubmissionById);
 // --- Rutas para Estudiantes ---
 
 // POST /api/submissions/

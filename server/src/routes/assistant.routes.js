@@ -1,18 +1,15 @@
+// server/src/routes/assistant.routes.js
 import { Router } from 'express';
-import { queryAssistant } from '../controllers/assistant.controller.js';
+import { queryAssistant, generateFlashcards } from '../controllers/assistant.controller.js'; // <-- Importar nueva función
 import { authenticateToken, authorizeRole } from '../middlewares/auth.middleware.js';
+import { queryAssistant, generateFlashcards, generateFeedback } from '../controllers/assistant.controller.js';
+
 
 const router = Router();
-
-// Aplicamos autenticación
 router.use(authenticateToken);
 
-// POST /api/assistant/query
-// Ruta para que los estudiantes hagan preguntas
-router.post(
-  '/query',
-  authorizeRole('ESTUDIANTE'), // Solo los estudiantes pueden usarlo
-  queryAssistant
-);
+router.post('/query', authorizeRole('ESTUDIANTE'), queryAssistant);
+router.post('/flashcards', authorizeRole('ESTUDIANTE'), generateFlashcards);
+router.post('/feedback', authorizeRole(['DOCENTE', 'ADMIN']), generateFeedback);
 
 export default router;

@@ -16,7 +16,19 @@ import AdminUsersPage from './pages/AdminUsersPage';
 import AuditLogPage from './pages/AuditLogPage';
 import CourseStatsPage from './pages/CourseStatsPage';
 import CreateMaterialPage from './pages/CreateMaterialPage';
+import ExamsPage from './pages/ExamsPage';
+import CreateExamPage from './pages/CreateExamPage';
+import EditExamPage from './pages/EditExamPage';
+import TakeExamPage from './pages/TakeExamPage';
+import ExamSubmissionsPage from './pages/ExamSubmissionsPage';
+import GradeSubmissionPage from './pages/GradeSubmissionPage';
+import StudentGradesPage from './pages/StudentGradesPage';
+import MaterialDetailPage from './pages/MaterialDetailPage'; 
+import AboutPage from './pages/AboutPage';
+import FeaturesPage from './pages/FeaturesPage';
 
+// --- IMPORTANTE: IMPORTA LA PÁGINA DEL ASISTENTE ---
+import StudentAssistantPage from './pages/StudentAssistantPage'; 
 
 function App() {
   return (
@@ -28,19 +40,32 @@ function App() {
       <Route path="/verify-otp" element={<OTPPage />} />
       <Route path="/request-reset" element={<RequestResetPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
-
+      <Route path="/about" element={<AboutPage />} />
+      <Route path="/features" element={<FeaturesPage />} /> 
       {/* Rutas Privadas Protegidas */}
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardLayout />}>
           
           <Route index element={<DashboardIndexPage />} /> 
           
-          {/* --- ¡AQUÍ ESTÁ LA MAGIA! --- */}
-          {/* Ruta para la lista de materiales */}
+          {/* Rutas de Materiales */}
           <Route path="materials" element={<MaterialsPage />} />
-          {/* Ruta para el formulario de creación */}
           <Route path="materials/new" element={<CreateMaterialPage />} />
-          {/* ------------------------------- */}
+          <Route path="materials/:id" element={<MaterialDetailPage />} />
+
+          {/* Rutas de Exámenes */}
+          <Route path="exams" element={<ExamsPage />} />
+          <Route path="exams/new" element={<CreateExamPage />} />
+          <Route path="exams/:id/edit" element={<EditExamPage />} />
+          <Route path="exams/:id/take" element={<TakeExamPage />} />
+          
+          {/* Rutas de Calificación */}
+          <Route path="exams/:id/submissions" element={<ExamSubmissionsPage />} />
+          <Route path="grading/:submissionId" element={<GradeSubmissionPage />} />
+          <Route path="my-grades" element={<StudentGradesPage />} />
+
+          {/* --- AQUÍ FALTABA ESTA RUTA --- */}
+          <Route path="assistant" element={<StudentAssistantPage />} />
 
           {/* Rutas de Admin */}
           <Route path="students" element={<AdminUsersPage role="ESTUDIANTE" />} />
@@ -54,7 +79,6 @@ function App() {
 
         </Route>
       </Route>
-
     </Routes>
   )
 }

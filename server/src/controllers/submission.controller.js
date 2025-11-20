@@ -97,7 +97,8 @@ export const gradeSubmission = async (req, res) => {
     const gradedSubmission = await prisma.studentExam.update({
       where: { id: submissionId },
       data: {
-        grade: parseFloat(grade) // Aseguramos que sea un número
+        grade: parseFloat(grade), // Aseguramos que sea un número
+       feedback: feedback || ""
       }
     });
 
@@ -164,5 +165,20 @@ export const getSubmissionsForExam = async (req, res) => {
   } catch (error) {
     console.error("Error al obtener entregas del examen:", error);
     res.status(500).json({ message: "Error interno del servidor." });
+  }
+  
+};
+// Añadir al final del archivo:
+export const getSubmissionById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const submission = await prisma.studentExam.findUnique({
+      where: { id },
+      include: { student: true } // Necesitamos info del estudiante
+    });
+    if (!submission) return res.status(404).json({ message: "No encontrada" });
+    res.json(submission);
+  } catch (error) {
+    res.status(500).json({ message: "Error" });
   }
 };

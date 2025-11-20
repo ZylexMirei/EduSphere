@@ -15,8 +15,7 @@ export const createMaterial = async (req, res) => {
     }
     const authorId = req.user.userId;
 
-    // 2. Verificar Body (Aquí es donde fallaba)
-    // Si multer funciona, req.body ya debería tener los datos de texto
+  
     console.log("Body Recibido:", req.body); 
     
     const { title, content } = req.body;
@@ -26,16 +25,20 @@ export const createMaterial = async (req, res) => {
       return res.status(400).json({ message: "El título es obligatorio. (Asegúrate de enviarlo en el form-data)" });
     }
 
-    // 3. Procesar Archivos
-    const uploadedAttachments = []; 
-    if (req.files && req.files.length > 0) {
-      console.log(`Procesando ${req.files.length} archivos...`);
+  
+   
+      const uploadedAttachments = []; 
+      if (req.files && req.files.length > 0) {
+      // Detectamos automáticamente el protocolo (http/https) y el host (localhost:3001)
+      const protocol = req.protocol;
+      const host = req.get('host'); 
+      
       for (const file of req.files) {
-        // IMPORTANTE: Asegúrate de que este puerto (3001) sea el correcto
-        const fileUrl = `http://localhost:3001/uploads/${file.filename}`;
+        // Generamos la URL dinámica
+        const fileUrl = `${protocol}://${host}/uploads/${file.filename}`;
         uploadedAttachments.push(fileUrl);
       }
-    } else {
+      } else {
       console.log("No se recibieron archivos.");
     }
 
