@@ -36,6 +36,7 @@ export default function LoginPage() {
 
     } catch (err) {
       // Manejo de errores
+      // ⚠️ ESTO AHORA MOSTRARÁ EL ERROR REAL DEL SERVIDOR DE CORREO (SMTP)
       const msg = err.response?.data?.message || 'Error al conectar con el servidor.';
       setError(msg);
     } finally {

@@ -6,7 +6,7 @@ import { createAuditLog } from '../services/audit.service.js';
  */
 export const createMaterial = async (req, res) => {
   console.log("--- INICIO DE CREATE MATERIAL ---");
-  console.log("Headers:", req.headers['content-type']); // Debería decir multipart/form-data...
+  console.log("Headers:", req.headers['content-type']); 
   
   try {
     // 1. Verificar Usuario
@@ -14,7 +14,6 @@ export const createMaterial = async (req, res) => {
       return res.status(401).json({ message: "Usuario no autenticado." });
     }
     const authorId = req.user.userId;
-
   
     console.log("Body Recibido:", req.body); 
     
@@ -22,23 +21,20 @@ export const createMaterial = async (req, res) => {
 
     if (!title) {
       console.error("ERROR: Título no encontrado en req.body");
-      return res.status(400).json({ message: "El título es obligatorio. (Asegúrate de enviarlo en el form-data)" });
+      return res.status(400).json({ message: "El título es obligatorio." });
     }
 
-  
-   
-      const uploadedAttachments = []; 
-      if (req.files && req.files.length > 0) {
-      // Detectamos automáticamente el protocolo (http/https) y el host (localhost:3001)
+    // 2. Procesar Archivos
+    const uploadedAttachments = []; 
+    if (req.files && req.files.length > 0) {
       const protocol = req.protocol;
       const host = req.get('host'); 
       
       for (const file of req.files) {
-        // Generamos la URL dinámica
         const fileUrl = `${protocol}://${host}/uploads/${file.filename}`;
         uploadedAttachments.push(fileUrl);
       }
-      } else {
+    } else {
       console.log("No se recibieron archivos.");
     }
 
@@ -52,7 +48,7 @@ export const createMaterial = async (req, res) => {
       }
     });
     
-    // 5. Historial
+    // 5. Historial (Audit Log)
     try {
       if (createAuditLog) {
         await createAuditLog(
@@ -77,7 +73,6 @@ export const createMaterial = async (req, res) => {
   }
 };
 
-// ... (Mantén el resto de funciones: getAllMaterials, getMaterialById, etc.)
 export const getAllMaterials = async (req, res) => {
   try {
     const materials = await prisma.material.findMany({
@@ -110,34 +105,58 @@ export const updateMaterial = async (req, res) => {
     const { title, content } = req.body;
     const userId = req.user.userId;
     const userRole = req.user.role;
+    
     const material = await prisma.material.findUnique({ where: { id } });
     if (!material) return res.status(404).json({ message: "Material no encontrado." });
-    if (material.authorId !== userId && userRole !== 'ADMIN') return res.status(403).json({ message: "No tienes permisos." });
+    
+    if (material.authorId !== userId && userRole !== 'ADMIN') {
+        return res.status(403).json({ message: "No tienes permisos." });
+    }
 
     const updatedMaterial = await prisma.material.update({
       where: { id: id },
       data: { title, content } 
     });
-    if (createAuditLog) await createAuditLog(userId, 'MATERIAL_UPDATED', { details: `Material actualizado: ${title}` }, id, req.ip);
+    
+    // Log opcional
+    try {
+        if (createAuditLog) await createAuditLog(userId, 'MATERIAL_UPDATED', { details: `Material actualizado: ${title}` }, id, req.ip);
+    } catch (e) { console.warn("Log error ignorado"); }
+
     res.status(200).json(updatedMaterial);
   } catch (error) {
     res.status(500).json({ message: "Error interno." });
   }
 };
 
+// --- AQUÍ ESTABA EL ERROR: AHORA ESTÁ CORREGIDO Y ÚNICO ---
 export const deleteMaterial = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.userId;
     const userRole = req.user.role;
-    const material = await prisma.material.findUnique({ where: { id } });
-    if (!material) return res.status(404).json({ message: "Material no encontrado." });
-    if (material.authorId !== userId && userRole !== 'ADMIN') return res.status(403).json({ message: "No tienes permisos." });
 
-    await prisma.material.delete({ where: { id: id } });
-    if (createAuditLog) await createAuditLog(userId, 'MATERIAL_DELETED', { details: `Material eliminado: ${material.title}` }, id, req.ip);
-    res.status(204).send();
+    // 1. Buscar el material
+    const material = await prisma.material.findUnique({ where: { id } });
+
+    if (!material) return res.status(404).json({ message: "Material no encontrado." });
+
+    // 2. Verificar permisos (Solo el autor o un Admin pueden borrar)
+    if (material.authorId !== userId && userRole !== 'ADMIN') {
+      return res.status(403).json({ message: "No tienes permiso para eliminar este material." });
+    }
+
+    // 3. Eliminar de la base de datos
+    await prisma.material.delete({ where: { id } });
+
+    // Log opcional
+    try {
+        if (createAuditLog) await createAuditLog(userId, 'MATERIAL_DELETED', { details: `Material eliminado: ${material.title}` }, id, req.ip);
+    } catch (e) { console.warn("Log error ignorado"); }
+
+    res.status(204).send(); // Éxito sin contenido
   } catch (error) {
+    console.error("Error al eliminar material:", error);
     res.status(500).json({ message: "Error interno." });
   }
 };

@@ -110,7 +110,8 @@ export const sendVerificationEmail = async (toEmail, otpCode) => {
     console.log(`Correo de verificación enviado a ${toEmail}`);
   } catch (error) {
     console.error("¡ERROR DE SMTP AL ENVIAR VERIFICACIÓN!", error);
-    throw new Error("Fallo al enviar el correo. Revisa las credenciales SMTP en .env");
+    // Propagamos el error de NodeMailer para que auth.controller.js lo capture
+    throw new Error("Fallo al enviar el correo. Revisa las credenciales SMTP en .env: " + error.message);
   }
 };
 
@@ -138,6 +139,7 @@ export const sendPasswordResetEmail = async (toEmail, otpCode) => {
     console.log(`Correo de reseteo enviado a ${toEmail}`);
   } catch (error) {
     console.error("¡ERROR DE SMTP AL ENVIAR RESETEO!", error);
-    throw new Error("Fallo al enviar el correo. Revisa las credenciales SMTP en .env");
+    // Propagamos el error de NodeMailer
+    throw new Error("Fallo al enviar el correo. Revisa las credenciales SMTP en .env: " + error.message);
   }
 };

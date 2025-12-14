@@ -27,7 +27,8 @@ async function generateAndSendOTP(email, purpose) {
     }
   } catch (error) {
     console.error(`Error enviando OTP (${purpose}):`, error);
-    throw new Error("No se pudo enviar el correo de verificación.");
+    // ¡IMPORTANTE! Propagamos el error de mail.service.js
+    throw new Error(error.message || "No se pudo enviar el correo de verificación.");
   }
 }
 
@@ -58,11 +59,11 @@ export const register = async (req, res) => {
     res.status(201).json({ message: "Usuario creado. Revisa tu correo para el código." });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Error en el servidor al registrar." });
+    res.status(500).json({ message: error.message || "Error en el servidor al registrar." });
   }
 };
 
-// --- 2. LOGIN (SOLO OTP - CORREGIDO) ---
+// --- 2. LOGIN (SOLO OTP - CORREGIDO PARA DEPURACIÓN) ---
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -89,7 +90,8 @@ export const login = async (req, res) => {
 
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Error interno en login." });
+    // 🔴 FIX CLAVE: Devolvemos el mensaje de error real del SMTP
+    res.status(500).json({ message: error.message || "Error interno en login." });
   }
 };
 
@@ -156,7 +158,7 @@ export const resendOTP = async (req, res) => {
     await generateAndSendOTP(email, 'VERIFICATION');
     res.status(200).json({ message: "Nuevo código enviado." });
   } catch (error) {
-    res.status(500).json({ message: "Error al reenviar." });
+    res.status(500).json({ message: error.message || "Error al reenviar." });
   }
 };
 
@@ -175,7 +177,7 @@ export const requestPasswordReset = async (req, res) => {
     // Respondemos siempre positivo para no revelar qué emails existen
     res.status(200).json({ message: "Si el correo existe, recibirás un código." });
   } catch (error) {
-    res.status(500).json({ message: "Error en la solicitud." });
+    res.status(500).json({ message: error.message || "Error en la solicitud." });
   }
 };
 
