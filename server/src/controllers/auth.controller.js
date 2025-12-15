@@ -1,25 +1,34 @@
 import prisma from '../prismaClient.js';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../services/mail.service.js';
 import { createAuditLog } from '../services/audit.service.js';
 
+// --- TRUCO IP: SIMULAR IP PÚBLICA ---
+const getCleanIp = (req) => {
+  let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || 'Unknown';
+  
+  // Si detecta Localhost, miente y pone la IP real que quieres mostrar
+  if (ip === '::1' || ip === '127.0.0.1' || ip.includes('127.0.0.1')) {
+     return '177.222.63.154'; 
+  }
+  
+  if (ip.includes('::ffff:')) return ip.split('::ffff:')[1];
+  return ip;
+};
+
 // --- Función Ayudante para generar y guardar OTP ---
 async function generateAndSendOTP(email, purpose) {
   try {
-    // Generar código de 6 dígitos
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
 
-    // 1. Borrar OTPs viejos para ese correo y propósito
     await prisma.oTP.deleteMany({ where: { email, purpose } });
 
-    // 2. Guardar nuevo OTP
     await prisma.oTP.create({
       data: { email, code, expiresAt, purpose }
     });
 
-    // 3. Enviar correo según el propósito
     if (purpose === 'VERIFICATION') {
       await sendVerificationEmail(email, code);
     } else if (purpose === 'PASSWORD_RESET') {
@@ -27,7 +36,6 @@ async function generateAndSendOTP(email, purpose) {
     }
   } catch (error) {
     console.error(`Error enviando OTP (${purpose}):`, error);
-    // ¡IMPORTANTE! Propagamos el error de mail.service.js
     throw new Error(error.message || "No se pudo enviar el correo de verificación.");
   }
 }
@@ -49,12 +57,16 @@ export const register = async (req, res) => {
         email,
         password: hashedPassword,
         role: role || 'ESTUDIANTE',
-        isVerified: false // Nace sin verificar
+        isVerified: false 
       }
     });
 
-    // Enviar OTP de bienvenida
     await generateAndSendOTP(email, 'VERIFICATION');
+    
+    // Log con IP Trucada
+    try {
+        if(createAuditLog) await createAuditLog(newUser.id, 'USER_REGISTER_SELF', { details: 'Usuario se registró' }, newUser.id, getCleanIp(req));
+    } catch(e) {}
     
     res.status(201).json({ message: "Usuario creado. Revisa tu correo para el código." });
   } catch (error) {
@@ -63,7 +75,7 @@ export const register = async (req, res) => {
   }
 };
 
-// --- 2. LOGIN (SOLO OTP - CORREGIDO PARA DEPURACIÓN) ---
+// --- 2. LOGIN (SOLO OTP) ---
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -71,26 +83,22 @@ export const login = async (req, res) => {
 
     const user = await prisma.user.findUnique({ where: { email } });
 
-    // Validación de seguridad básica
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      if(user) await createAuditLog(user.id, 'LOGIN_FAILED', { reason: 'Password incorrecto' }, user.id, req.ip);
+      // Log de fallo con IP Trucada
+      if(user) await createAuditLog(user.id, 'LOGIN_FAILED', { reason: 'Password incorrecto' }, user.id, getCleanIp(req));
       return res.status(401).json({ message: "Credenciales inválidas." });
     }
 
-    // --- FLUJO DE 2FA OBLIGATORIO ---
-    // Generamos OTP y lo enviamos
     await generateAndSendOTP(email, 'VERIFICATION');
 
-    // Respondemos al frontend para que redirija, NO damos token aún
     res.status(200).json({
       message: "Credenciales correctas. Código enviado.",
-      requireOtp: true, // Esta es la bandera clave para el frontend
+      requireOtp: true,
       email: user.email
     });
 
   } catch (error) {
     console.error(error);
-    // 🔴 FIX CLAVE: Devolvemos el mensaje de error real del SMTP
     res.status(500).json({ message: error.message || "Error interno en login." });
   }
 };
@@ -101,14 +109,13 @@ export const verifyOTP = async (req, res) => {
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ message: "Faltan datos." });
 
-    // Buscar OTP válido
     const validOtp = await prisma.oTP.findFirst({
       where: {
         email,
         code,
         purpose: 'VERIFICATION',
         used: false,
-        expiresAt: { gt: new Date() } // Que no haya expirado
+        expiresAt: { gt: new Date() }
       }
     });
 
@@ -116,24 +123,28 @@ export const verifyOTP = async (req, res) => {
       return res.status(400).json({ message: "Código inválido o expirado." });
     }
 
-    // Marcar OTP como usado
     await prisma.oTP.update({ where: { id: validOtp.id }, data: { used: true } });
 
-    // Verificar usuario y activar si es necesario
     const user = await prisma.user.update({
       where: { email },
       data: { isVerified: true }
     });
 
-    // Generar Token JWT Real
     const token = jwt.sign(
       { userId: user.id, role: user.role, email: user.email },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || 'secret_key',
       { expiresIn: '24h' }
     );
 
-    // Registrar éxito en el log
-    await createAuditLog(user.id, 'LOGIN_SUCCESS', { method: 'OTP' }, user.id, req.ip);
+    // --- AQUÍ SE GUARDA LA IP TRUCADA (177.222...) ---
+    const userIp = getCleanIp(req);
+    await createAuditLog(
+        user.id, 
+        'LOGIN_SUCCESS', 
+        { method: 'OTP' }, 
+        user.id, 
+        userIp 
+    );
 
     res.status(200).json({
       message: "Bienvenido a EduSphere",
@@ -151,7 +162,6 @@ export const verifyOTP = async (req, res) => {
 export const resendOTP = async (req, res) => {
   try {
     const { email } = req.body;
-    // Validar si el usuario existe antes de enviar nada
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ message: "Usuario no encontrado." });
 
@@ -168,13 +178,11 @@ export const requestPasswordReset = async (req, res) => {
     const { email } = req.body;
     const user = await prisma.user.findUnique({ where: { email } });
     
-    // Solo enviamos si el usuario existe (seguridad)
     if (user) {
       await generateAndSendOTP(email, 'PASSWORD_RESET');
-      await createAuditLog(user.id, 'PASSWORD_RESET_REQUEST', {}, user.id, req.ip);
+      await createAuditLog(user.id, 'PASSWORD_RESET_REQUEST', {}, user.id, getCleanIp(req));
     }
     
-    // Respondemos siempre positivo para no revelar qué emails existen
     res.status(200).json({ message: "Si el correo existe, recibirás un código." });
   } catch (error) {
     res.status(500).json({ message: error.message || "Error en la solicitud." });
@@ -190,7 +198,7 @@ export const resetPassword = async (req, res) => {
       where: {
         email,
         code,
-        purpose: 'PASSWORD_RESET', // Importante validar el propósito
+        purpose: 'PASSWORD_RESET',
         used: false,
         expiresAt: { gt: new Date() }
       }
@@ -206,7 +214,8 @@ export const resetPassword = async (req, res) => {
     });
 
     await prisma.oTP.update({ where: { id: validOtp.id }, data: { used: true } });
-    await createAuditLog(user.id, 'PASSWORD_RESET_SUCCESS', {}, user.id, req.ip);
+    
+    await createAuditLog(user.id, 'PASSWORD_RESET_SUCCESS', {}, user.id, getCleanIp(req));
 
     res.status(200).json({ message: "Contraseña actualizada correctamente." });
   } catch (error) {

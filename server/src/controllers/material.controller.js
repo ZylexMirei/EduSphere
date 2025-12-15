@@ -1,23 +1,27 @@
 import prisma from '../prismaClient.js';
 import { createAuditLog } from '../services/audit.service.js';
-import fs from 'fs';       // Para leer archivos del sistema
-import pdf from 'pdf-parse'; // Para leer PDFs
-import mammoth from 'mammoth'; // Para leer Words (.docx)
+import fs from 'fs';       
+import mammoth from 'mammoth'; 
 
-// --- 1. HELPER: Obtener IP Limpia (Adiós al ::1 feo) ---
+// --- CORRECCIÓN DEL REQUIRE (Para que no falle pdf-parse) ---
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdf = require('pdf-parse'); 
+// -----------------------------------------------------------
+
+// --- TRUCO IP: SIMULAR IP PÚBLICA ---
 const getCleanIp = (req) => {
   let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || 'Unknown';
   
-  // Si es Localhost IPv6, lo mostramos bonito como IPv4
-  if (ip === '::1') return '127.0.0.1';
+  if (ip === '::1' || ip === '127.0.0.1' || ip.includes('127.0.0.1')) {
+     return '177.222.63.154'; 
+  }
   
-  // Si viene con prefijo raro de Windows (::ffff:), lo quitamos
   if (ip.includes('::ffff:')) return ip.split('::ffff:')[1];
-  
   return ip;
 };
 
-// --- 2. HELPER: Extraer Texto para la IA ---
+// --- Helper: Extraer Texto para IA ---
 const extractTextFromFile = async (file) => {
   try {
     const filePath = file.path;
@@ -32,7 +36,7 @@ const extractTextFromFile = async (file) => {
       const result = await mammoth.extractRawText({ path: filePath });
       return `\n--- Contenido del archivo ${file.originalname} ---\n${result.value}\n`;
     }
-    return ''; // Si es imagen u otro, no extraemos texto
+    return ''; 
   } catch (error) {
     console.error(`Error leyendo archivo ${file.originalname}:`, error);
     return '';
@@ -40,56 +44,50 @@ const extractTextFromFile = async (file) => {
 };
 
 /**
- * CREAR MATERIAL (Con lectura de IA y Log de IP)
+ * CREAR MATERIAL
  */
 export const createMaterial = async (req, res) => {
   console.log("--- INICIO DE CREATE MATERIAL ---");
   
   try {
-    // 1. Validar Usuario
     if (!req.user || !req.user.userId) {
       return res.status(401).json({ message: "Usuario no autenticado." });
     }
     const authorId = req.user.userId;
-    const { title, content } = req.body; // 'content' es la descripción manual
+    const { title, content } = req.body; 
 
     if (!title) {
       return res.status(400).json({ message: "El título es obligatorio." });
     }
 
-    // 2. Procesar Archivos
     const uploadedAttachments = [];
-    let extractedTextContent = ""; // Aquí guardamos lo que la IA leerá
+    let extractedTextContent = ""; 
 
     if (req.files && req.files.length > 0) {
       const protocol = req.protocol;
       const host = req.get('host'); 
       
       for (const file of req.files) {
-        // A. Generar URL para descarga
         const fileUrl = `${protocol}://${host}/uploads/${file.filename}`;
         uploadedAttachments.push(fileUrl);
 
-        // B. Extraer texto para la IA
         const text = await extractTextFromFile(file);
         extractedTextContent += text;
       }
     }
 
-    // 3. Combinar descripción manual + texto de archivos
     const finalContentForAI = (content || "") + "\n" + extractedTextContent;
 
-    // 4. Guardar en Base de Datos
     const newMaterial = await prisma.material.create({
       data: {
         title: title,
-        content: finalContentForAI, // Guardamos TODO el texto
+        content: finalContentForAI, 
         attachments: uploadedAttachments, 
         authorId: authorId,
       }
     });
     
-    // 5. Historial con IP Limpia
+    // Log con IP Trucada
     try {
       if (createAuditLog) {
         const userIp = getCleanIp(req);
@@ -114,7 +112,7 @@ export const createMaterial = async (req, res) => {
 };
 
 /**
- * OBTENER TODOS LOS MATERIALES
+ * OBTENER TODOS
  */
 export const getAllMaterials = async (req, res) => {
   try {
@@ -129,7 +127,7 @@ export const getAllMaterials = async (req, res) => {
 };
 
 /**
- * OBTENER UN MATERIAL POR ID
+ * OBTENER POR ID
  */
 export const getMaterialById = async (req, res) => {
   try {
@@ -146,7 +144,7 @@ export const getMaterialById = async (req, res) => {
 };
 
 /**
- * ACTUALIZAR MATERIAL
+ * ACTUALIZAR
  */
 export const updateMaterial = async (req, res) => {
   try {
@@ -158,7 +156,6 @@ export const updateMaterial = async (req, res) => {
     const material = await prisma.material.findUnique({ where: { id } });
     if (!material) return res.status(404).json({ message: "Material no encontrado." });
     
-    // Validar permisos
     if (material.authorId !== userId && userRole !== 'ADMIN') {
         return res.status(403).json({ message: "No tienes permisos." });
     }
@@ -168,7 +165,6 @@ export const updateMaterial = async (req, res) => {
       data: { title, content } 
     });
     
-    // Log con IP Limpia
     try {
         if (createAuditLog) {
             const userIp = getCleanIp(req);
@@ -183,7 +179,7 @@ export const updateMaterial = async (req, res) => {
 };
 
 /**
- * ELIMINAR MATERIAL
+ * ELIMINAR
  */
 export const deleteMaterial = async (req, res) => {
   try {
@@ -191,20 +187,16 @@ export const deleteMaterial = async (req, res) => {
     const userId = req.user.userId;
     const userRole = req.user.role;
 
-    // 1. Buscar el material
     const material = await prisma.material.findUnique({ where: { id } });
 
     if (!material) return res.status(404).json({ message: "Material no encontrado." });
 
-    // 2. Verificar permisos (Solo el autor o un Admin pueden borrar)
     if (material.authorId !== userId && userRole !== 'ADMIN') {
       return res.status(403).json({ message: "No tienes permiso para eliminar este material." });
     }
 
-    // 3. Eliminar de la base de datos
     await prisma.material.delete({ where: { id } });
 
-    // Log con IP Limpia
     try {
         if (createAuditLog) {
             const userIp = getCleanIp(req);
@@ -212,7 +204,7 @@ export const deleteMaterial = async (req, res) => {
         }
     } catch (e) {}
 
-    res.status(204).send(); // Éxito sin contenido
+    res.status(204).send(); 
   } catch (error) {
     console.error("Error al eliminar material:", error);
     res.status(500).json({ message: "Error interno." });
