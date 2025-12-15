@@ -3,25 +3,20 @@ import { createAuditLog } from '../services/audit.service.js';
 import fs from 'fs';       
 import mammoth from 'mammoth'; 
 
-// --- CORRECCIÓN DEL REQUIRE (Para que no falle pdf-parse) ---
+// Importación compatible para pdf-parse
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const pdf = require('pdf-parse'); 
-// -----------------------------------------------------------
 
-// --- TRUCO IP: SIMULAR IP PÚBLICA ---
+// --- HELPER IP REAL ---
 const getCleanIp = (req) => {
   let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || 'Unknown';
-  
-  if (ip === '::1' || ip === '127.0.0.1' || ip.includes('127.0.0.1')) {
-     return '177.222.63.154'; 
-  }
-  
-  if (ip.includes('::ffff:')) return ip.split('::ffff:')[1];
+  if (ip.includes('::ffff:')) ip = ip.split('::ffff:')[1];
+  if (ip === '::1') return '127.0.0.1';
   return ip;
 };
 
-// --- Helper: Extraer Texto para IA ---
+// --- Extraer Texto para IA ---
 const extractTextFromFile = async (file) => {
   try {
     const filePath = file.path;
@@ -43,22 +38,14 @@ const extractTextFromFile = async (file) => {
   }
 };
 
-/**
- * CREAR MATERIAL
- */
 export const createMaterial = async (req, res) => {
-  console.log("--- INICIO DE CREATE MATERIAL ---");
-  
   try {
-    if (!req.user || !req.user.userId) {
-      return res.status(401).json({ message: "Usuario no autenticado." });
-    }
+    if (!req.user || !req.user.userId) return res.status(401).json({ message: "No autenticado." });
+    
     const authorId = req.user.userId;
     const { title, content } = req.body; 
 
-    if (!title) {
-      return res.status(400).json({ message: "El título es obligatorio." });
-    }
+    if (!title) return res.status(400).json({ message: "Título obligatorio." });
 
     const uploadedAttachments = [];
     let extractedTextContent = ""; 
@@ -66,13 +53,9 @@ export const createMaterial = async (req, res) => {
     if (req.files && req.files.length > 0) {
       const protocol = req.protocol;
       const host = req.get('host'); 
-      
       for (const file of req.files) {
-        const fileUrl = `${protocol}://${host}/uploads/${file.filename}`;
-        uploadedAttachments.push(fileUrl);
-
-        const text = await extractTextFromFile(file);
-        extractedTextContent += text;
+        uploadedAttachments.push(`${protocol}://${host}/uploads/${file.filename}`);
+        extractedTextContent += await extractTextFromFile(file);
       }
     }
 
@@ -87,33 +70,19 @@ export const createMaterial = async (req, res) => {
       }
     });
     
-    // Log con IP Trucada
     try {
       if (createAuditLog) {
-        const userIp = getCleanIp(req);
-        await createAuditLog(
-          authorId, 
-          'MATERIAL_CREATED', 
-          { details: `Material creado: ${title}` }, 
-          newMaterial.id,
-          userIp
-        );
+        await createAuditLog(authorId, 'MATERIAL_CREATED', { details: `Material: ${title}` }, newMaterial.id, getCleanIp(req));
       }
-    } catch (logError) {
-      console.warn("No se pudo guardar el log:", logError.message);
-    }
+    } catch (e) {}
 
     res.status(201).json(newMaterial);
-
   } catch (error) {
-    console.error("Error en createMaterial:", error);
-    res.status(500).json({ message: "Error interno: " + error.message });
+    console.error(error);
+    res.status(500).json({ message: "Error interno." });
   }
 };
 
-/**
- * OBTENER TODOS
- */
 export const getAllMaterials = async (req, res) => {
   try {
     const materials = await prisma.material.findMany({
@@ -126,9 +95,6 @@ export const getAllMaterials = async (req, res) => {
   }
 };
 
-/**
- * OBTENER POR ID
- */
 export const getMaterialById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -136,16 +102,13 @@ export const getMaterialById = async (req, res) => {
       where: { id: id },
       include: { author: { select: { name: true, email: true } } }
     });
-    if (!material) return res.status(404).json({ message: "Material no encontrado." });
+    if (!material) return res.status(404).json({ message: "No encontrado." });
     res.status(200).json(material);
   } catch (error) {
     res.status(500).json({ message: "Error interno." });
   }
 };
 
-/**
- * ACTUALIZAR
- */
 export const updateMaterial = async (req, res) => {
   try {
     const { id } = req.params;
@@ -154,33 +117,20 @@ export const updateMaterial = async (req, res) => {
     const userRole = req.user.role;
     
     const material = await prisma.material.findUnique({ where: { id } });
-    if (!material) return res.status(404).json({ message: "Material no encontrado." });
+    if (!material) return res.status(404).json({ message: "No encontrado." });
     
-    if (material.authorId !== userId && userRole !== 'ADMIN') {
-        return res.status(403).json({ message: "No tienes permisos." });
-    }
+    if (material.authorId !== userId && userRole !== 'ADMIN') return res.status(403).json({ message: "Sin permisos." });
 
-    const updatedMaterial = await prisma.material.update({
-      where: { id: id },
-      data: { title, content } 
-    });
+    const updated = await prisma.material.update({ where: { id }, data: { title, content } });
     
-    try {
-        if (createAuditLog) {
-            const userIp = getCleanIp(req);
-            await createAuditLog(userId, 'MATERIAL_UPDATED', { details: `Material actualizado: ${title}` }, id, userIp);
-        }
-    } catch (e) {}
+    try { if (createAuditLog) await createAuditLog(userId, 'MATERIAL_UPDATED', { details: `Actualizado: ${title}` }, id, getCleanIp(req)); } catch (e) {}
 
-    res.status(200).json(updatedMaterial);
+    res.status(200).json(updated);
   } catch (error) {
     res.status(500).json({ message: "Error interno." });
   }
 };
 
-/**
- * ELIMINAR
- */
 export const deleteMaterial = async (req, res) => {
   try {
     const { id } = req.params;
@@ -188,25 +138,16 @@ export const deleteMaterial = async (req, res) => {
     const userRole = req.user.role;
 
     const material = await prisma.material.findUnique({ where: { id } });
+    if (!material) return res.status(404).json({ message: "No encontrado." });
 
-    if (!material) return res.status(404).json({ message: "Material no encontrado." });
-
-    if (material.authorId !== userId && userRole !== 'ADMIN') {
-      return res.status(403).json({ message: "No tienes permiso para eliminar este material." });
-    }
+    if (material.authorId !== userId && userRole !== 'ADMIN') return res.status(403).json({ message: "Sin permisos." });
 
     await prisma.material.delete({ where: { id } });
 
-    try {
-        if (createAuditLog) {
-            const userIp = getCleanIp(req);
-            await createAuditLog(userId, 'MATERIAL_DELETED', { details: `Material eliminado: ${material.title}` }, id, userIp);
-        }
-    } catch (e) {}
+    try { if (createAuditLog) await createAuditLog(userId, 'MATERIAL_DELETED', { details: `Eliminado: ${material.title}` }, id, getCleanIp(req)); } catch (e) {}
 
     res.status(204).send(); 
   } catch (error) {
-    console.error("Error al eliminar material:", error);
     res.status(500).json({ message: "Error interno." });
   }
 };
