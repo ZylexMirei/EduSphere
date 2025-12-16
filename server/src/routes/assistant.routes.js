@@ -1,16 +1,11 @@
 import { Router } from 'express';
-// Aquí estaba el error: antes tenías dos líneas importando cosas. Ahora solo una:
-import { queryAssistant, generateFlashcards, generateFeedback } from '../controllers/assistant.controller.js';
-import { authenticateToken, authorizeRole } from '../middlewares/auth.middleware.js';
+import { chatWithIA, generateFlashcards } from '../controllers/assistant.controller.js';
+import { authenticateToken } from '../middlewares/auth.middleware.js'; // Ajusta la ruta si es distinta
 
 const router = Router();
 
-
-router.use(authenticateToken);
-
-router.post('/query', authorizeRole('ESTUDIANTE'), queryAssistant);
-router.post('/flashcards', authorizeRole('ESTUDIANTE'), generateFlashcards)
-
-router.post('/feedback', authorizeRole(['DOCENTE', 'ADMIN']), generateFeedback);
+// Rutas protegidas (solo usuarios logueados pueden usar la IA)
+router.post('/chat', authenticateToken, chatWithIA);
+router.post('/flashcards', authenticateToken, generateFlashcards);
 
 export default router;

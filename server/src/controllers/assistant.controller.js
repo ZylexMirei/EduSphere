@@ -1,146 +1,117 @@
 import prisma from '../prismaClient.js';
 import OpenAI from 'openai';
-import 'dotenv/config';
 
-// 1. Inicializar el cliente de OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Configuración de OpenAI (Intenta leer la key, si falla no crashea todo el app, solo el chat)
+let openai;
+try {
+  if (process.env.OPENAI_API_KEY) {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+} catch (error) {
+  console.error("Error al inicializar OpenAI:", error);
+}
 
-/**
- * Responde una pregunta del estudiante usando el contexto de los materiales.
- * Solo para Estudiantes.
- */
-export const queryAssistant = async (req, res) => {
+export const chatWithIA = async (req, res) => {
   try {
     const { question, materialIds } = req.body;
-    const studentId = req.user.userId;
 
-    if (!question || !materialIds || !Array.isArray(materialIds) || materialIds.length === 0) {
-      return res.status(400).json({ message: "La pregunta y un array de 'materialIds' son obligatorios." });
+    // 1. Validaciones básicas
+    if (!openai) {
+      return res.status(500).json({ answer: "Error: No hay API KEY de OpenAI configurada en el servidor (.env)." });
+    }
+    if (!question || !materialIds || materialIds.length === 0) {
+      return res.status(400).json({ answer: "Por favor selecciona materiales y haz una pregunta." });
     }
 
-    // 2. Obtener el contenido de los materiales desde la BD
-    // (Aquí asumimos que el estudiante tiene permiso para verlos,
-    // ya que puede ver la lista de materiales)
+    // 2. Buscar el contenido de los materiales seleccionados
     const materials = await prisma.material.findMany({
       where: {
         id: { in: materialIds }
+      },
+      select: {
+        title: true,
+        content: true // Aquí está el texto que extrajimos de los PDFs
       }
     });
 
     if (materials.length === 0) {
-      return res.status(404).json({ message: "No se encontró contenido en los materiales seleccionados." });
+      return res.status(404).json({ answer: "No encontré los materiales seleccionados." });
     }
 
-    // 3. Crear el "Contexto" para la IA
-    let context = "Contexto de estudio (responde basándote SOLO en esto):\n\n";
-    materials.forEach(material => {
-      context += `--- Material: ${material.title} ---\n`;
-      context += `${material.content}\n\n`;
-      // (Podríamos incluir 'attachments' si fueran texto, pero por ahora solo 'content')
-    });
+    // 3. Preparar el contexto para la IA
+    // Juntamos todo el texto de los PDFs en un solo bloque
+    let contextText = materials.map(m => `--- DOCUMENTO: ${m.title} ---\n${m.content}`).join("\n\n");
+    
+    // Recortar texto si es demasiado largo (para no gastar tokens infinitos o dar error)
+    if (contextText.length > 20000) {
+        contextText = contextText.substring(0, 20000) + "... [Texto truncado]";
+    }
 
-    // 4. Enviar la petición a la API de OpenAI
-    const chatCompletion = await openai.chat.completions.create({
+    // 4. Enviar a OpenAI
+    const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo", // O "gpt-4" si tienes acceso
       messages: [
-        {
-          role: "system",
-          content: `Eres "EduSphere", un asistente virtual de IA para estudiantes. Tu única tarea es responder preguntas basándote ESTRICTAMENTE en el contexto que te proporciona el usuario. Si la respuesta no está en el contexto, debes decir "Lo siento, no puedo encontrar esa información en los materiales de estudio proporcionados."`
+        { 
+          role: "system", 
+          content: `Eres un asistente de estudio útil y preciso. 
+          Tu tarea es responder a la pregunta del estudiante BASÁNDOTE ÚNICAMENTE en el contexto proporcionado abajo.
+          Si la respuesta no está en el contexto, di amablemente que no encuentras esa información en los documentos.
+          
+          CONTEXTO DE ESTUDIO:
+          ${contextText}` 
         },
-        {
-          role: "user",
-          content: `${context}\n\nPregunta del estudiante:\n${question}`
-        }
+        { role: "user", content: question }
       ],
-      max_tokens: 500, // Limita la longitud de la respuesta
+      temperature: 0.3, // Baja temperatura para que sea más fiel al texto
     });
 
-    // 5. Devolver la respuesta de la IA al estudiante
-    const assistantResponse = chatCompletion.choices[0].message.content;
-    res.status(200).json({ answer: assistantResponse });
+    const answer = completion.choices[0].message.content;
+
+    // 5. Responder al Frontend
+    res.json({ answer });
 
   } catch (error) {
-    console.error("Error en el asistente de IA:", error);
-    res.status(500).json({ message: "Error interno del servidor al procesar la pregunta." });
+    console.error("Error en chatWithIA:", error);
+    // Devolver un mensaje amigable en lugar de un error 500 crudo
+    res.status(500).json({ answer: "Lo siento, hubo un error al procesar tu solicitud con la IA. Revisa la terminal del servidor." });
   }
 };
+
 export const generateFlashcards = async (req, res) => {
   try {
     const { materialIds } = req.body;
     
-    // 1. Obtener contenido
+    if (!openai) return res.status(500).json([]);
+
     const materials = await prisma.material.findMany({
       where: { id: { in: materialIds } },
       select: { title: true, content: true }
     });
 
-    if (materials.length === 0) return res.status(404).json({ message: "No hay materiales." });
-
-    let context = materials.map(m => `Título: ${m.title}\nContenido: ${m.content}`).join('\n\n');
-
-    // 2. Pedir JSON estricto a OpenAI
-    const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: `Eres un profesor experto. Genera 5 tarjetas de estudio (flashcards) basadas en el texto proporcionado. 
-          La salida DEBE ser un JSON válido con este formato exacto:
-          [
-            { "question": "Pregunta conceptual", "answer": "Respuesta breve y clara" },
-            ...
-          ]
-          No incluyas texto adicional fuera del JSON.`
-        },
-        { role: "user", content: context }
-      ],
-    });
-
-    // 3. Parsear la respuesta
-    const rawContent = completion.choices[0].message.content;
-    const flashcards = JSON.parse(rawContent); // Convertimos texto a objeto JS
-
-    res.status(200).json(flashcards);
-
-  } catch (error) {
-    console.error("Error Flashcards:", error);
-    res.status(500).json({ message: "Error al generar tarjetas." });
-  }
-};
-export const generateFeedback = async (req, res) => {
-  try {
-    const { question, studentAnswer, correctAnswer } = req.body;
-    
-    if (!question || !studentAnswer) {
-      return res.status(400).json({ message: "Faltan datos para generar feedback." });
-    }
+    let contextText = materials.map(m => `--- DOC: ${m.title} ---\n${m.content}`).join("\n\n").substring(0, 15000);
 
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         {
           role: "system",
-          content: `Eres un profesor amable y constructivo. Tu tarea es evaluar la respuesta de un estudiante y generar un feedback breve (máximo 2 frases).
-          
-          Si la respuesta es incorrecta, explica brevemente por qué y cuál era la correcta (si se proporciona).
-          Si es correcta, felicítalo y refuerza el concepto.
-          `
+          content: `Genera exactamente 4 tarjetas de estudio (Flashcards) basadas en el texto proporcionado.
+          El formato de salida DEBE ser un JSON puro (Array de objetos) con esta estructura exacta:
+          [{"question": "Pregunta...", "answer": "Respuesta..."}, ...]
+          No añadas texto extra, solo el JSON.`
         },
-        { 
-          role: "user", 
-          content: `Pregunta: "${question}"\nRespuesta del Estudiante: "${studentAnswer}"\nRespuesta Correcta (Contexto): "${correctAnswer || 'N/A'}"` 
-        }
-      ],
-      max_tokens: 100,
+        { role: "user", content: `Texto: ${contextText}` }
+      ]
     });
 
-    const feedback = completion.choices[0].message.content;
-    res.status(200).json({ feedback });
+    // Limpieza básica por si la IA devuelve texto antes del JSON
+    const cleanJson = completion.choices[0].message.content.replace(/```json|```/g, '').trim();
+    const flashcards = JSON.parse(cleanJson);
+
+    res.json(flashcards);
 
   } catch (error) {
-    console.error("Error Feedback IA:", error);
-    res.status(500).json({ message: "Error al generar feedback." });
+    console.error("Error generando flashcards:", error);
+    res.status(500).json([]);
   }
 };
