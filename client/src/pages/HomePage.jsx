@@ -21,6 +21,11 @@ export default function HomePage() {
           </h1>
           <p className="hero-subtitle">
             Tu plataforma de aprendizaje asistido por IA. ¡Prepárate para el futuro!
+            
+          </p>
+            <p className="hero-subtitle">
+            Version 1.0.0.1.
+            
           </p>
 
           <div className="hero-buttons">
